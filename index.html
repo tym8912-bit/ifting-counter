@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リフティングカウンター 試作版</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677085; --line: #dde1e8;
+    --accent: #1f7a4d; --accent-2: #e8f4ee; --warn: #c2410c; --bad: #c62828; --ball: #ff9f1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #9aa3b5; --line: #2c3340;
+      --accent: #4cc38a; --accent-2: #1d3329; --warn: #fb923c; --bad: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; }
+  header { padding: 16px 20px 4px; max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 small { font-size: 12px; color: var(--muted); font-weight: normal; margin-left: 8px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  main { max-width: 1280px; margin: 0 auto; padding: 12px 16px 40px; display: grid; gap: 16px;
+    grid-template-columns: minmax(0, 1fr) 360px; }
+  @media (max-width: 960px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  label { display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+  .field { margin: 8px 0; }
+  .field .lab { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  select, input[type=file] { font: inherit; color: inherit; max-width: 100%; }
+  select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .hint.warn { color: var(--warn); }
+  progress { width: 100%; height: 10px; }
+  .viewer { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+  .viewer canvas { display: block; width: 100%; height: auto; }
+  .viewer video#cam { display: block; width: 100%; height: auto; }
+  .viewer .countdown { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 120px; font-weight: 800; color: #fff; text-shadow: 0 4px 20px rgba(0,0,0,.6); pointer-events: none; }
+  .rectime { color: var(--bad); font-weight: 700; font-variant-numeric: tabular-nums; }
+  button.rec { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
+  .viewer .placeholder { color: #aab; text-align: center; padding: 80px 20px; }
+  .viewer.picking canvas { cursor: crosshair; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .controls input[type=range] { flex: 1 1 200px; }
+  .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 96px; }
+  .big { display: flex; gap: 24px; align-items: baseline; flex-wrap: wrap; }
+  .big .num { font-size: 56px; font-weight: 700; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .big .sub { color: var(--muted); font-size: 13px; }
+  .big .sub b { color: var(--text); font-size: 18px; }
+  #chart { width: 100%; height: 200px; display: block; cursor: pointer; }
+  .slider { margin: 10px 0; }
+  .slider .top { display: flex; justify-content: space-between; font-size: 13px; }
+  .slider .top span:last-child { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  .slider input { width: 100%; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: normal; font-size: 12px; position: sticky; top: 0; background: var(--panel); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--accent-2); }
+  .tablewrap { max-height: 320px; overflow: auto; }
+  .ok { color: var(--accent); } .ng { color: var(--bad); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  #video { position: fixed; left: -10000px; top: 0; width: 2px; height: 2px; opacity: 0; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .status { font-size: 13px; margin-top: 6px; min-height: 1.6em; }
+  .swatch { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); vertical-align: middle; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ リフティングカウンター<small>試作版:動画をブラウザ内で解析して回数を数えます(動画は外部に送信されません)</small></h1>
+</header>
+
+<main>
+  <div class="col">
+    <section class="panel">
+      <h2>1. 撮影する(または動画を選ぶ)</h2>
+      <div class="row">
+        <button class="primary" id="btnCam">📷 カメラを起動</button>
+        <button id="btnRec" hidden>● 録画開始</button>
+        <button id="btnFlip" hidden title="前面/背面カメラの切り替え">🔄 カメラ切替</button>
+        <button id="btnCamOff" hidden>カメラを閉じる</button>
+        <span class="rectime" id="recTime" hidden></span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label><input type="checkbox" id="autoAnalyze" checked> 録画を止めたらすぐ解析する</label>
+        <label>開始前カウントダウン <select id="countdown"><option value="0">なし</option><option value="3" selected>3秒</option><option value="5">5秒</option><option value="10">10秒</option></select></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="hint">または動画ファイル:</span>
+        <input type="file" id="file" accept="video/*">
+      </div>
+      <div class="hint" style="margin-top:6px">スマホは横向き・三脚などで固定し、全身とボールが映る距離で撮ると精度が上がります。スマホでカメラを使うには、このページをHTTPSのURLで開く必要があります。</div>
+    </section>
+
+    <section class="panel">
+      <div class="viewer" id="viewer">
+        <div class="placeholder" id="placeholder">「カメラを起動」で撮影するか、動画ファイルを選んでください</div>
+        <video id="cam" playsinline muted hidden></video>
+        <div class="countdown" id="cdOverlay" hidden></div>
+        <canvas id="view" hidden></canvas>
+      </div>
+      <div class="controls">
+        <button id="btnPlay" disabled>▶ 再生</button>
+        <button id="btnPrev" disabled title="1フレーム戻る(←)">◀︎</button>
+        <button id="btnNext" disabled title="1フレーム進む(→)">▶︎</button>
+        <input type="range" id="seek" min="0" max="1000" value="0" step="1" disabled>
+        <span class="time" id="time">0.00 / 0.00 秒</span>
+        <select id="speed" title="再生速度">
+          <option value="0.25">0.25x</option><option value="0.5" selected>0.5x</option><option value="1">1x</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label><input type="checkbox" id="showTrail" checked> 軌跡</label>
+        <label><input type="checkbox" id="showBall" checked> ボール検出</label>
+        <label><input type="checkbox" id="showPose" checked> ポーズ(骨格)</label>
+        <label><input type="checkbox" id="showGround" checked> 足元ライン</label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="big">
+        <div><div class="num" id="countNow">–</div><div class="sub">再生位置までの回数</div></div>
+        <div class="sub">合計 <b id="countTotal">–</b> 回<br>最大連続 <b id="countStreak">–</b> 回</div>
+        <div class="sub">ボール検出率 <b id="detRate">–</b><br>ポーズ検出率 <b id="poseRate">–</b></div>
+      </div>
+      <h2 style="margin-top:14px">ボールの高さの推移</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:#9aa3b5"></i>検出位置(生データ)</span>
+        <span><i style="background:var(--ball)"></i>平滑化した軌跡</span>
+        <span><i style="background:#22c55e"></i>カウントした最下点</span>
+        <span><i style="background:#ef4444"></i>除外した最下点</span>
+        <span><i style="background:#60a5fa"></i>足元の高さ</span>
+      </div>
+      <div class="hint">グラフをクリックするとその時刻へ移動します。</div>
+    </section>
+
+    <section class="panel">
+      <h2>検出イベント一覧</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>時刻</th><th>接触部位</th><th>判定</th><th>上下幅</th></tr></thead>
+          <tbody id="events"><tr><td colspan="5" class="hint">解析後に表示されます</td></tr></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="btnCsv" disabled>フレームごとのデータをCSVで保存</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel">
+      <h2>2. 解析の設定</h2>
+      <div class="field">
+        <div class="lab">ボールの見つけ方</div>
+        <label><input type="radio" name="mode" value="ai" checked> AI物体検出(MediaPipe・自動)</label>
+        <label><input type="radio" name="mode" value="color"> 色で追跡(動画上のボールをクリックして指定)</label>
+      </div>
+      <div class="field" id="aiOpts">
+        <div class="lab">AIモデル</div>
+        <select id="aiModel">
+          <option value="lite0">EfficientDet-Lite0(速い)</option>
+          <option value="lite2">EfficientDet-Lite2(高精度・遅い)</option>
+        </select>
+      </div>
+      <div class="field" id="colorOpts" hidden>
+        <div class="lab">登録した色 <span class="swatch" id="swatch"></span> <span id="colorInfo">未登録</span></div>
+        <div class="slider">
+          <div class="top"><span>色の許容範囲</span><span id="colorTolV">25</span></div>
+          <input type="range" id="colorTol" min="5" max="60" value="25">
+        </div>
+        <div class="hint">動画を一時停止した状態で、映像の中のボールをクリックしてください。</div>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="usePose" checked> ポーズ推定も行う(足・もも・頭との接触判定、地面バウンドの除外)</label>
+      </div>
+      <div class="field">
+        <div class="lab">解析フレームレート</div>
+        <select id="fps">
+          <option value="15">15 fps(速い)</option>
+          <option value="30" selected>30 fps(標準)</option>
+          <option value="60">60 fps(高速な動き向け・遅い)</option>
+        </select>
+      </div>
+      <div class="row">
+        <button class="primary" id="btnAnalyze" disabled>解析開始</button>
+        <button id="btnCancel" hidden>中止</button>
+      </div>
+      <progress id="progress" value="0" max="1" hidden></progress>
+      <div class="status" id="status"></div>
+    </section>
+
+    <section class="panel">
+      <h2>3. カウント条件の調整</h2>
+      <div class="hint">解析し直さずに、すぐ数え直します。</div>
+      <div class="slider">
+        <div class="top"><span>最小の上下幅(ボール直径の何倍か)</span><span id="ampV"></span></div>
+        <input type="range" id="amp" min="0.3" max="5" step="0.1" value="1.2">
+      </div>
+      <div class="slider">
+        <div class="top"><span>タッチの最小間隔(秒)</span><span id="minIntV"></span></div>
+        <input type="range" id="minInt" min="0.1" max="1" step="0.05" value="0.25">
+      </div>
+      <div class="slider">
+        <div class="top"><span>平滑化(フレーム数)</span><span id="smoothV"></span></div>
+        <input type="range" id="smooth" min="1" max="9" step="2" value="3">
+      </div>
+      <div class="slider">
+        <div class="top"><span>見失った区間を補間する最大長(秒)</span><span id="gapV"></span></div>
+        <input type="range" id="gap" min="0" max="0.6" step="0.05" value="0.25">
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="useContact" checked> 体との接触を条件にする(ポーズ推定時)</label>
+      </div>
+      <div class="slider">
+        <div class="top"><span>接触とみなす距離(胴の長さの何倍か)</span><span id="contactV"></span></div>
+        <input type="range" id="contact" min="0.1" max="1.5" step="0.05" value="0.6">
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="useGround" checked> 足元より下での跳ね返りは地面として除外</label>
+      </div>
+      <details>
+        <summary>カウントの仕組み</summary>
+        <div class="hint" style="margin-top:6px">
+          ① 各フレームでボールの位置を検出し、高さの推移(縦座標)を平滑化します。<br>
+          ② 「落ちてきて、指定した上下幅以上また上がった」最下点をタッチ候補とします。<br>
+          ③ ポーズ推定がある場合は、最下点でボールが足・もも・頭・胸のどれかに近いかを調べ、近ければカウント、足元より下なら地面として除外します。
+        </div>
+      </details>
+    </section>
+  </div>
+</main>
+
+<video id="video" playsinline muted preload="auto"></video>
+
+<script type="module">
+const MP_VERSION = "0.10.14";
+const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+const MODEL_URLS = {
+  lite0: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+  lite2: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite",
+  pose: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+};
+const MAX_DIM = 640;          // 解析解像度(長辺)
+
+const $ = (id) => document.getElementById(id);
+const video = $("video"), view = $("view"), vctx = view.getContext("2d");
+const work = document.createElement("canvas"), wctx = work.getContext("2d", { willReadFrequently: true });
+const crop = document.createElement("canvas"), cctx = crop.getContext("2d");
+const small = document.createElement("canvas"), sctx = small.getContext("2d", { willReadFrequently: true });
+
+const state = {
+  W: 0, H: 0, loaded: false, analyzing: false, cancel: false,
+  frames: null, fps: 30, result: null, colorTarget: null, mp: null,
+  detectors: {}, pose: null, tsCounter: 0,
+};
+
+/* ---------------- UI helpers ---------------- */
+function setStatus(msg, warn = false) { $("status").textContent = msg; $("status").className = "status" + (warn ? " hint warn" : ""); }
+function mode() { return document.querySelector('input[name=mode]:checked').value; }
+function fmt(t) { return t.toFixed(2); }
+
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener("change", () => {
+  $("aiOpts").hidden = mode() !== "ai";
+  $("colorOpts").hidden = mode() !== "color";
+  $("viewer").classList.toggle("picking", mode() === "color");
+  updateAnalyzeBtn();
+}));
+$("colorTol").addEventListener("input", () => $("colorTolV").textContent = $("colorTol").value);
+
+const sliders = [["amp", v => "×" + (+v).toFixed(1)], ["minInt", v => (+v).toFixed(2) + "秒"], ["smooth", v => v + "f"],
+  ["gap", v => (+v).toFixed(2) + "秒"], ["contact", v => "×" + (+v).toFixed(2)]];
+for (const [id, f] of sliders) {
+  const upd = () => { $(id + "V").textContent = f($(id).value); };
+  upd();
+  $(id).addEventListener("input", () => { upd(); recount(); });
+}
+["useContact", "useGround"].forEach(id => $(id).addEventListener("change", recount));
+["showTrail", "showBall", "showPose", "showGround"].forEach(id => $(id).addEventListener("change", () => render()));
+
+function updateAnalyzeBtn() {
+  const ok = state.loaded && !state.analyzing && (mode() === "ai" || state.colorTarget);
+  $("btnAnalyze").disabled = !ok;
+  if (state.loaded && mode() === "color" && !state.colorTarget) setStatus("映像の中のボールをクリックして色を登録してください。");
+}
+
+/* ---------------- 動画の読み込み ---------------- */
+$("file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  closeCamera();
+  await loadSource(URL.createObjectURL(f));
+});
+
+async function loadSource(url) {
+  stopPlayback();
+  state.loaded = false; state.frames = null; state.result = null;
+  if (video.src && video.src.startsWith("blob:")) URL.revokeObjectURL(video.src);
+  video.src = url;
+  setStatus("動画を読み込み中…");
+  try {
+    await new Promise((res, rej) => {
+      video.onloadeddata = res;
+      video.onerror = () => rej(new Error("この動画形式はこのブラウザで再生できません"));
+    });
+    if (!isFinite(video.duration)) { // MediaRecorder製webm等で長さが不明な場合
+      video.currentTime = 1e9; await once(video, "seeked"); video.currentTime = 0; await once(video, "seeked");
+    }
+  } catch (err) { setStatus(err.message, true); return false; }
+  const s = Math.min(1, MAX_DIM / Math.max(video.videoWidth, video.videoHeight));
+  state.W = work.width = view.width = Math.round(video.videoWidth * s);
+  state.H = work.height = view.height = Math.round(video.videoHeight * s);
+  view.hidden = false; $("placeholder").hidden = true;
+  state.loaded = true;
+  ["btnPlay", "btnPrev", "btnNext", "seek"].forEach(id => $(id).disabled = false);
+  $("btnCsv").disabled = true;
+  resetResultsUI();
+  await seekTo(0);
+  render();
+  setStatus(`読み込み完了:${video.videoWidth}×${video.videoHeight}、${fmt(video.duration)}秒`);
+  updateAnalyzeBtn();
+  return true;
+}
+
+/* ---------------- カメラ撮影 ---------------- */
+const cam = $("cam");
+const camState = { stream: null, facing: "environment", rec: null, chunks: [], timer: 0, t0: 0, cdTimer: 0 };
+
+function pickMime() {
+  const c = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  return c.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+}
+async function openCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setStatus("このページではカメラを使えません。HTTPSのURL(またはパソコンで直接開いたファイル)で開いてください。", true);
+    return;
+  }
+  try {
+    closeCamera(true);
+    camState.stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: camState.facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } },
+    });
+  } catch (err) {
+    setStatus("カメラを起動できませんでした:" + (err.name === "NotAllowedError" ? "カメラの使用が許可されていません。ブラウザの設定で許可してください。" : err.message), true);
+    return;
+  }
+  stopPlayback();
+  cam.srcObject = camState.stream;
+  await cam.play().catch(() => {});
+  cam.hidden = false; view.hidden = true; $("placeholder").hidden = true;
+  $("btnRec").hidden = $("btnFlip").hidden = $("btnCamOff").hidden = false;
+  $("btnCam").hidden = true;
+  const st = camState.stream.getVideoTracks()[0].getSettings();
+  setStatus(`カメラ起動中(${st.width || "?"}×${st.height || "?"}、${st.frameRate ? Math.round(st.frameRate) : "?"}fps)。準備ができたら「録画開始」を押してください。`);
+}
+function closeCamera(keepUI) {
+  if (camState.rec && camState.rec.state !== "inactive") { camState.rec.onstop = null; camState.rec.stop(); }
+  clearInterval(camState.timer); clearInterval(camState.cdTimer); $("cdOverlay").hidden = true;
+  if (camState.stream) camState.stream.getTracks().forEach(t => t.stop());
+  camState.stream = null; camState.rec = null;
+  cam.srcObject = null;
+  if (keepUI) return;
+  cam.hidden = true;
+  if (state.loaded) view.hidden = false; else $("placeholder").hidden = false;
+  $("btnRec").hidden = $("btnFlip").hidden = $("btnCamOff").hidden = true;
+  $("btnCam").hidden = false; $("recTime").hidden = true;
+  $("btnRec").textContent = "● 録画開始"; $("btnRec").classList.remove("rec");
+}
+function startRecording() {
+  const mime = pickMime();
+  camState.chunks = [];
+  try { camState.rec = new MediaRecorder(camState.stream, mime ? { mimeType: mime, videoBitsPerSecond: 6e6 } : undefined); }
+  catch (err) { setStatus("このブラウザは録画に対応していません:" + err.message, true); return; }
+  camState.rec.ondataavailable = e => { if (e.data && e.data.size) camState.chunks.push(e.data); };
+  camState.rec.onstop = onRecorded;
+  camState.rec.start(250);
+  camState.t0 = performance.now();
+  $("btnRec").textContent = "■ 録画停止"; $("btnRec").classList.add("rec"); $("btnRec").disabled = false;
+  $("recTime").hidden = false;
+  camState.timer = setInterval(() => { $("recTime").textContent = "● " + ((performance.now() - camState.t0) / 1000).toFixed(1) + "秒"; }, 100);
+  setStatus("録画中… リフティングが終わったら「録画停止」を押してください。");
+}
+function beginRecording() {
+  let n = +$("countdown").value;
+  if (!n) return startRecording();
+  $("btnRec").disabled = true;
+  $("cdOverlay").hidden = false; $("cdOverlay").textContent = n;
+  camState.cdTimer = setInterval(() => {
+    n--;
+    if (n > 0) { $("cdOverlay").textContent = n; return; }
+    clearInterval(camState.cdTimer); $("cdOverlay").hidden = true;
+    startRecording();
+  }, 1000);
+}
+async function onRecorded() {
+  clearInterval(camState.timer);
+  const type = camState.rec.mimeType || "video/webm";
+  const blob = new Blob(camState.chunks, { type });
+  closeCamera();
+  if (!blob.size) { setStatus("録画データが空でした。もう一度お試しください。", true); return; }
+  const ok = await loadSource(URL.createObjectURL(blob));
+  if (!ok) return;
+  if ($("autoAnalyze").checked) {
+    if (mode() === "ai" || state.colorTarget) analyze();
+    else setStatus("撮影完了。映像の中のボールをタップして色を登録し、「解析開始」を押してください。");
+  }
+}
+$("btnCam").addEventListener("click", openCamera);
+$("btnCamOff").addEventListener("click", () => closeCamera());
+$("btnFlip").addEventListener("click", () => { camState.facing = camState.facing === "environment" ? "user" : "environment"; openCamera(); });
+$("btnRec").addEventListener("click", () => {
+  if (camState.rec && camState.rec.state === "recording") { camState.rec.stop(); setStatus("録画を保存中…"); }
+  else beginRecording();
+});
+
+function once(el, ev, timeout = 3000) {
+  return new Promise(res => {
+    const done = () => { el.removeEventListener(ev, done); clearTimeout(tm); res(); };
+    const tm = setTimeout(done, timeout);
+    el.addEventListener(ev, done);
+  });
+}
+async function seekTo(t) {
+  const p = once(video, "seeked");
+  video.currentTime = Math.min(t, Math.max(0, video.duration - 0.001));
+  await p;
+}
+
+/* ---------------- 色指定(色追跡モード) ---------------- */
+view.addEventListener("click", (e) => {
+  if (mode() !== "color" || state.analyzing || !state.loaded) return;
+  const rect = view.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * state.W, y = (e.clientY - rect.top) / rect.height * state.H;
+  wctx.drawImage(video, 0, 0, state.W, state.H);
+  const r = 3, d = wctx.getImageData(Math.max(0, x - r) | 0, Math.max(0, y - r) | 0, 2 * r + 1, 2 * r + 1).data;
+  let R = 0, G = 0, B = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; n++; }
+  R /= n; G /= n; B /= n;
+  const hsv = rgb2hsv(R, G, B);
+  state.colorTarget = { hsv, rgb: [R, G, B], seed: { x, y }, refArea: null };
+  // クリック位置から領域を広げて、ボールの大きさを推定
+  const blob = colorBlobAt(x, y);
+  if (blob) state.colorTarget.refArea = blob.area;
+  $("swatch").style.background = `rgb(${R | 0},${G | 0},${B | 0})`;
+  $("colorInfo").textContent = blob ? `登録済み(推定直径 ${(blob.r * 2).toFixed(0)}px)` : "登録済み";
+  setStatus("色を登録しました。「解析開始」を押してください。");
+  updateAnalyzeBtn();
+  render({ x, y, r: blob ? blob.r : 10 });
+});
+
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) {
+    if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  return [h, mx ? d / mx : 0, mx];
+}
+
+/* 縮小フレームで色マスク → 連結成分 → ボールらしい塊を選ぶ */
+function colorMask() {
+  const sw = Math.round(state.W / 2), sh = Math.round(state.H / 2);
+  small.width = sw; small.height = sh;
+  sctx.drawImage(work, 0, 0, sw, sh);
+  const d = sctx.getImageData(0, 0, sw, sh).data;
+  const [th, ts, tv] = state.colorTarget.hsv;
+  const tol = +$("colorTol").value / 100;
+  const achromatic = ts < 0.22;
+  const mask = new Uint8Array(sw * sh);
+  for (let i = 0, p = 0; p < mask.length; i += 4, p++) {
+    const [h, s, v] = rgb2hsv(d[i], d[i + 1], d[i + 2]);
+    let ok;
+    if (achromatic) ok = s < 0.22 + tol * 0.4 && Math.abs(v - tv) < tol * 0.9;
+    else {
+      const dh = Math.min(Math.abs(h - th), 360 - Math.abs(h - th));
+      ok = dh < tol * 70 && Math.abs(s - ts) < tol * 1.6 && Math.abs(v - tv) < tol * 2.0;
+    }
+    mask[p] = ok ? 1 : 0;
+  }
+  return { mask, sw, sh };
+}
+function blobs(mask, sw, sh) {
+  const lab = new Int32Array(sw * sh), out = [], stack = [];
+  let id = 0;
+  for (let p = 0; p < mask.length; p++) {
+    if (!mask[p] || lab[p]) continue;
+    id++; let area = 0, sx = 0, sy = 0, minx = 1e9, maxx = -1, miny = 1e9, maxy = -1;
+    stack.push(p); lab[p] = id;
+    while (stack.length) {
+      const q = stack.pop(), x = q % sw, y = (q / sw) | 0;
+      area++; sx += x; sy += y;
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+      const nb = [q - 1, q + 1, q - sw, q + sw];
+      for (let k = 0; k < 4; k++) {
+        const n = nb[k];
+        if (k === 0 && x === 0) continue; if (k === 1 && x === sw - 1) continue;
+        if (n < 0 || n >= mask.length || !mask[n] || lab[n]) continue;
+        lab[n] = id; stack.push(n);
+      }
+    }
+    if (area < 4) continue;
+    const bw = maxx - minx + 1, bh = maxy - miny + 1;
+    out.push({ x: sx / area * 2, y: sy / area * 2, area: area * 4, r: Math.sqrt(area * 4 / Math.PI),
+      fill: area / (bw * bh), aspect: Math.max(bw, bh) / Math.min(bw, bh) });
+  }
+  return out;
+}
+function colorBlobAt(x, y) {
+  const { mask, sw, sh } = colorMask();
+  const bs = blobs(mask, sw, sh);
+  let best = null, bd = 1e9;
+  for (const b of bs) { const d = Math.hypot(b.x - x, b.y - y) - b.r; if (d < bd) { bd = d; best = b; } }
+  return best && bd < 15 ? best : null;
+}
+function detectBallColor(prev) {
+  const { mask, sw, sh } = colorMask();
+  const ref = state.colorTarget.refArea;
+  let best = null, bestCost = 1e9;
+  for (const b of blobs(mask, sw, sh)) {
+    if (b.aspect > 2.2 || b.fill < 0.45) continue;
+    if (ref && (b.area < ref * 0.2 || b.area > ref * 4)) continue;
+    let cost = ref ? Math.abs(Math.log(b.area / ref)) : -Math.log(b.area);
+    if (prev) cost += Math.hypot(b.x - prev.x, b.y - prev.y) / (state.W * 0.15);
+    if (cost < bestCost) { bestCost = cost; best = b; }
+  }
+  return best ? { x: best.x, y: best.y, r: best.r, score: 1 } : null;
+}
+
+/* ---------------- MediaPipe ---------------- */
+async function loadMP() {
+  if (state.mp) return state.mp;
+  setStatus("AIライブラリを読み込み中…");
+  const mod = await import(`${MP_BASE}/vision_bundle.mjs`);
+  const fileset = await mod.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+  state.mp = { mod, fileset };
+  return state.mp;
+}
+async function createWithFallback(create) {
+  try { return await create("GPU"); } catch (e) { console.warn("GPU不可、CPUで実行", e); return await create("CPU"); }
+}
+async function getDetector(kind) {
+  if (state.detectors[kind]) return state.detectors[kind];
+  const { mod, fileset } = await loadMP();
+  setStatus(`ボール検出モデル(${kind})を読み込み中…`);
+  const det = await createWithFallback(delegate => mod.ObjectDetector.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: MODEL_URLS[kind], delegate },
+    runningMode: "IMAGE", scoreThreshold: 0.15, maxResults: 10, categoryAllowlist: ["sports ball"],
+  }));
+  state.detectors[kind] = det;
+  return det;
+}
+async function getPose() {
+  if (state.pose) return state.pose;
+  const { mod, fileset } = await loadMP();
+  setStatus("ポーズ推定モデルを読み込み中…");
+  state.pose = await createWithFallback(delegate => mod.PoseLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: MODEL_URLS.pose, delegate },
+    runningMode: "VIDEO", numPoses: 1,
+  }));
+  return state.pose;
+}
+
+function runDetector(det, src, ox, oy, sx, sy) {
+  const res = det.detect(src);
+  return res.detections.map(d => {
+    const b = d.boundingBox;
+    return { x: ox + (b.originX + b.width / 2) * sx, y: oy + (b.originY + b.height / 2) * sy,
+      r: (b.width * sx + b.height * sy) / 4, score: d.categories[0].score };
+  });
+}
+function detectBallAI(det, prev) {
+  const { W, H } = state;
+  let cands = [];
+  // 直前の位置の周辺を切り出して検出(小さいボール対策)
+  if (prev) {
+    const size = Math.round(Math.max(prev.r * 16, Math.min(W, H) * 0.4));
+    const x0 = Math.round(Math.min(Math.max(prev.x - size / 2, 0), Math.max(0, W - size)));
+    const y0 = Math.round(Math.min(Math.max(prev.y - size / 2, 0), Math.max(0, H - size)));
+    const cw = Math.min(size, W), ch = Math.min(size, H);
+    crop.width = cw; crop.height = ch;
+    cctx.drawImage(work, x0, y0, cw, ch, 0, 0, cw, ch);
+    cands = runDetector(det, crop, x0, y0, 1, 1);
+  }
+  if (!cands.length) cands = runDetector(det, work, 0, 0, 1, 1);
+  cands = cands.filter(c => c.r * 2 < Math.min(W, H) * 0.4);
+  if (!cands.length) return null;
+  let best = null, bestCost = 1e9;
+  for (const c of cands) {
+    let cost = -c.score;
+    if (prev) cost += Math.hypot(c.x - prev.x, c.y - prev.y) / (Math.max(W, H) * 0.25);
+    if (cost < bestCost) { bestCost = cost; best = c; }
+  }
+  return best;
+}
+
+/* ---------------- 解析 ---------------- */
+$("btnAnalyze").addEventListener("click", analyze);
+$("btnCancel").addEventListener("click", () => { state.cancel = true; });
+
+async function analyze() {
+  stopPlayback();
+  state.analyzing = true; state.cancel = false;
+  updateAnalyzeBtn();
+  $("btnCancel").hidden = false;
+  const usePose = $("usePose").checked, m = mode();
+  try {
+    const det = m === "ai" ? await getDetector($("aiModel").value) : null;
+    const pose = usePose ? await getPose() : null;
+    const fps = +$("fps").value, n = Math.max(1, Math.floor(video.duration * fps));
+    const frames = [];
+    $("progress").hidden = false;
+    let prev = null, prevAge = 99, t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      if (state.cancel) throw new Error("中止しました");
+      const t = i / fps;
+      await seekTo(t + 0.5 / fps);   // フレーム境界ちょうどを避ける
+      wctx.drawImage(video, 0, 0, state.W, state.H);
+      const p = prevAge <= 10 ? prev : null;
+      const ball = m === "ai" ? detectBallAI(det, p) : detectBallColor(p);
+      if (ball) { prev = ball; prevAge = 0; } else prevAge++;
+      let lm = null;
+      if (pose) {
+        state.tsCounter += Math.round(1000 / fps);
+        const r = pose.detectForVideo(work, state.tsCounter);
+        if (r.landmarks && r.landmarks[0]) lm = r.landmarks[0].map(q => ({ x: q.x * state.W, y: q.y * state.H, v: q.visibility ?? 1 }));
+      }
+      frames.push({ t, ball, pose: lm });
+      if (i % 3 === 0 || i === n - 1) {
+        state.frames = frames; state.fps = fps;
+        drawFrame(t, frames[i]);
+        $("progress").value = (i + 1) / n;
+        const el = (performance.now() - t0) / 1000, eta = el / (i + 1) * (n - i - 1);
+        setStatus(`解析中… ${i + 1}/${n} フレーム(残り約${Math.ceil(eta)}秒)`);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    state.frames = frames; state.fps = fps;
+    const dr = frames.filter(f => f.ball).length / n;
+    setStatus(`解析完了(${((performance.now() - t0) / 1000).toFixed(1)}秒)` +
+      (dr < 0.5 ? "。ボールの検出率が低いです。色追跡モードやLite2モデルも試してください。" : ""), dr < 0.5);
+    $("btnCsv").disabled = false;
+    state.analyzing = false;
+    recount();
+    await seekTo(0);
+    render();
+  } catch (err) {
+    console.error(err);
+    setStatus("エラー:" + (err.message || err) +
+      (String(err).includes("fetch") || String(err).includes("import") ? "(ネット接続が必要です)" : ""), true);
+  } finally {
+    state.analyzing = false;
+    $("btnCancel").hidden = true; $("progress").hidden = true;
+    updateAnalyzeBtn();
+  }
+}
+
+/* ---------------- カウント処理 ---------------- */
+function median(a) { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; }
+
+function computeCounts(frames, fps, P) {
+  const n = frames.length;
+  const raw = frames.map(f => f.ball ? f.ball.y : NaN);
+  const rawX = frames.map(f => f.ball ? f.ball.x : NaN);
+  const rawR = frames.map(f => f.ball ? f.ball.r : NaN);
+  // 1) 欠損補間
+  const maxGap = Math.round(P.gap * fps);
+  const y = raw.slice(), x = rawX.slice(), r = rawR.slice(), interp = new Array(n).fill(false);
+  let last = -1;
+  for (let i = 0; i < n; i++) {
+    if (isNaN(raw[i])) continue;
+    if (last >= 0 && i - last > 1 && i - last - 1 <= maxGap) {
+      for (let k = last + 1; k < i; k++) {
+        const a = (k - last) / (i - last);
+        y[k] = raw[last] + (raw[i] - raw[last]) * a; x[k] = rawX[last] + (rawX[i] - rawX[last]) * a;
+        r[k] = rawR[last] + (rawR[i] - rawR[last]) * a; interp[k] = true;
+      }
+    }
+    last = i;
+  }
+  // 2) 平滑化(移動平均、欠損をまたがない)
+  const h = (P.smooth - 1) / 2, s = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    if (isNaN(y[i])) continue;
+    let sum = 0, c = 0;
+    for (let k = i - h; k <= i + h; k++) if (k >= 0 && k < n && !isNaN(y[k])) { sum += y[k]; c++; }
+    s[i] = sum / c;
+  }
+  // 3) 上下幅のしきい値
+  const diam = median(rawR.filter(v => !isNaN(v))) * 2;
+  const ampPx = isNaN(diam) ? state.H * 0.05 : P.amp * diam;
+  // 4) ジグザグ(ヒステリシス)で最下点を検出
+  const bottoms = [];
+  let dir = null, ext = -1, lo = -1, hi = -1;
+  for (let i = 0; i < n; i++) {
+    const v = s[i];
+    if (isNaN(v)) { dir = null; lo = hi = ext = -1; continue; }
+    if (dir === null) {
+      if (lo < 0 || v < s[lo]) lo = i;
+      if (hi < 0 || v > s[hi]) hi = i;
+      if (v - s[lo] > ampPx) { dir = "down"; ext = i; }        // 落下中(画面のyが増加)
+      else if (s[hi] - v > ampPx) { dir = "up"; ext = i; }
+      continue;
+    }
+    if (dir === "down") {
+      if (v >= s[ext]) ext = i;
+      else if (s[ext] - v > ampPx) {
+        // 上下幅:直前の最高点から最下点まで
+        let top = ext; for (let k = ext; k >= 0 && !isNaN(s[k]); k--) { if (s[k] < s[top]) top = k; if (bottoms.length && k <= bottoms[bottoms.length - 1].i) break; }
+        bottoms.push({ i: ext, rise: s[ext] - v, fall: s[ext] - s[top] });
+        dir = "up"; ext = i;
+      }
+    } else {
+      if (v <= s[ext]) ext = i;
+      else if (v - s[ext] > ampPx) { dir = "down"; ext = i; }
+    }
+  }
+  // 5) 接触判定
+  const events = [];
+  let lastCountT = -1e9;
+  for (const b of bottoms) {
+    const i = b.i, t = frames[i].t;
+    const ev = { i, t, x: x[i], y: s[i], rawY: y[i], r: r[i], amp: Math.max(b.rise, b.fall) / (diam || 1), part: "—", counted: true, reason: "" };
+    const lm = poseNear(frames, i, 2);
+    if (lm && P.usePose) {
+      const c = contactInfo(lm, ev.x, ev.rawY, ev.r || diam / 2);
+      ev.part = c.part; ev.ground = c.groundY;
+      if (P.useGround && c.belowGround) { ev.counted = false; ev.reason = "地面"; ev.part = "地面"; }
+      else if (P.useContact && c.dist > P.contact) { ev.counted = false; ev.reason = "体から遠い"; }
+    } else if (P.usePose) { ev.part = "不明(骨格なし)"; }
+    if (ev.counted && t - lastCountT < P.minInt) { ev.counted = false; ev.reason = "間隔が短い"; }
+    if (ev.counted) lastCountT = t;
+    events.push(ev);
+  }
+  // 連続回数(除外が入るとリセット)
+  let streak = 0, maxStreak = 0;
+  for (const e of events) { if (e.counted) { streak++; maxStreak = Math.max(maxStreak, streak); } else streak = 0; e.streak = streak; }
+  return { y, x, r, s, interp, events, diam, ampPx, total: events.filter(e => e.counted).length, maxStreak };
+}
+
+function poseNear(frames, i, w) {
+  for (let d = 0; d <= w; d++) for (const k of [i - d, i + d]) if (frames[k] && frames[k].pose) return frames[k].pose;
+  return null;
+}
+const mid = (a, b, t = 0.5) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+function bodyParts(lm) {
+  const sh = mid(lm[11], lm[12]), hp = mid(lm[23], lm[24]);
+  return [
+    { name: "頭", p: lm[0], extra: 0.15 },
+    { name: "胸", p: mid(sh, hp, 0.25), extra: 0 },
+    { name: "左もも", p: mid(lm[23], lm[25], 0.75), extra: 0 },
+    { name: "右もも", p: mid(lm[24], lm[26], 0.75), extra: 0 },
+    { name: "左足", p: mid(lm[27], lm[31]), extra: 0 },
+    { name: "右足", p: mid(lm[28], lm[32]), extra: 0 },
+  ];
+}
+function contactInfo(lm, bx, by, br) {
+  const sh = mid(lm[11], lm[12]), hp = mid(lm[23], lm[24]);
+  const torso = Math.hypot(sh.x - hp.x, sh.y - hp.y) || state.H * 0.25;
+  let best = null;
+  for (const bp of bodyParts(lm)) {
+    const d = (Math.hypot(bp.p.x - bx, bp.p.y - by) - br) / torso - bp.extra;
+    if (!best || d < best.dist) best = { part: bp.name, dist: Math.max(0, d) };
+  }
+  const groundY = Math.max(lm[29].y, lm[30].y, lm[31].y, lm[32].y);
+  return { ...best, groundY, belowGround: by + br > groundY + torso * 0.05 };
+}
+
+let recountTimer = 0;
+function recount() {
+  if (!state.frames || state.analyzing) return;
+  cancelAnimationFrame(recountTimer);
+  recountTimer = requestAnimationFrame(() => {
+    const hasPose = state.frames.some(f => f.pose);
+    const P = { amp: +$("amp").value, minInt: +$("minInt").value, smooth: +$("smooth").value, gap: +$("gap").value,
+      contact: +$("contact").value, useContact: $("useContact").checked, useGround: $("useGround").checked, usePose: hasPose };
+    state.result = computeCounts(state.frames, state.fps, P);
+    const n = state.frames.length;
+    $("countTotal").textContent = state.result.total;
+    $("countStreak").textContent = state.result.maxStreak;
+    $("detRate").textContent = Math.round(state.frames.filter(f => f.ball).length / n * 100) + "%";
+    $("poseRate").textContent = hasPose ? Math.round(state.frames.filter(f => f.pose).length / n * 100) + "%" : "未使用";
+    renderEvents();
+    render();
+  });
+}
+
+function resetResultsUI() {
+  ["countNow", "countTotal", "countStreak", "detRate", "poseRate"].forEach(id => $(id).textContent = "–");
+  $("events").innerHTML = '<tr><td colspan="5" class="hint">解析後に表示されます</td></tr>';
+  drawChart();
+}
+function renderEvents() {
+  const tb = $("events");
+  const ev = state.result.events;
+  if (!ev.length) { tb.innerHTML = '<tr><td colspan="5" class="hint">タッチ候補が見つかりませんでした</td></tr>'; return; }
+  let k = 0;
+  tb.innerHTML = ev.map((e, idx) => `<tr data-t="${e.t}">
+    <td>${e.counted ? ++k : ""}</td><td>${fmt(e.t)}秒</td><td>${e.part}</td>
+    <td class="${e.counted ? "ok" : "ng"}">${e.counted ? "カウント" : "除外:" + e.reason}</td>
+    <td>×${e.amp.toFixed(1)}</td></tr>`).join("");
+  tb.querySelectorAll("tr").forEach(tr => tr.addEventListener("click", async () => { stopPlayback(); await seekTo(+tr.dataset.t); render(); }));
+}
+
+/* ---------------- 描画 ---------------- */
+const POSE_LINKS = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28],
+  [27, 29], [29, 31], [27, 31], [28, 30], [30, 32], [28, 32], [0, 11], [0, 12]];
+
+function frameIndex(t) {
+  if (!state.frames) return -1;
+  return Math.max(0, Math.min(state.frames.length - 1, Math.round(t * state.fps)));
+}
+
+function drawFrame(t, liveFrame, pick) {
+  const { W, H } = state;
+  vctx.drawImage(video, 0, 0, W, H);
+  const lw = Math.max(1.5, W / 320);
+  const res = state.result, frames = state.frames;
+  const i = liveFrame ? -1 : frameIndex(t);
+  const f = liveFrame || (i >= 0 ? frames[i] : null);
+
+  // 足元ライン
+  if (f && f.pose && $("showGround").checked) {
+    const gy = Math.max(f.pose[29].y, f.pose[30].y, f.pose[31].y, f.pose[32].y);
+    vctx.strokeStyle = "rgba(96,165,250,.8)"; vctx.setLineDash([6, 6]); vctx.lineWidth = lw;
+    vctx.beginPath(); vctx.moveTo(0, gy); vctx.lineTo(W, gy); vctx.stroke(); vctx.setLineDash([]);
+  }
+  // 骨格
+  if (f && f.pose && $("showPose").checked) {
+    vctx.strokeStyle = "rgba(255,255,255,.85)"; vctx.lineWidth = lw;
+    for (const [a, b] of POSE_LINKS) { vctx.beginPath(); vctx.moveTo(f.pose[a].x, f.pose[a].y); vctx.lineTo(f.pose[b].x, f.pose[b].y); vctx.stroke(); }
+    vctx.fillStyle = "#60a5fa";
+    for (const bp of bodyParts(f.pose)) { vctx.beginPath(); vctx.arc(bp.p.x, bp.p.y, lw * 2.5, 0, 7); vctx.fill(); }
+  }
+  // 軌跡
+  if (res && i >= 0 && $("showTrail").checked) {
+    const len = Math.round(state.fps * 1.5);
+    vctx.lineWidth = lw * 1.5; vctx.lineCap = "round";
+    for (let k = Math.max(1, i - len); k <= i; k++) {
+      if (isNaN(res.s[k]) || isNaN(res.s[k - 1])) continue;
+      vctx.strokeStyle = `rgba(255,159,26,${0.15 + 0.85 * (1 - (i - k) / len)})`;
+      vctx.beginPath(); vctx.moveTo(res.x[k - 1], res.s[k - 1]); vctx.lineTo(res.x[k], res.s[k]); vctx.stroke();
+    }
+  }
+  // ボール検出
+  if ($("showBall").checked) {
+    if (f && f.ball) {
+      vctx.strokeStyle = "#22c55e"; vctx.lineWidth = lw;
+      vctx.beginPath(); vctx.arc(f.ball.x, f.ball.y, f.ball.r, 0, 7); vctx.stroke();
+      vctx.fillStyle = "#22c55e"; vctx.font = `${Math.round(11 * W / 640 + 3)}px sans-serif`;
+      if (f.ball.score < 1) vctx.fillText(f.ball.score.toFixed(2), f.ball.x + f.ball.r + 3, f.ball.y);
+    } else if (res && i >= 0 && res.interp[i]) {
+      vctx.strokeStyle = "#ff9f1a"; vctx.setLineDash([4, 4]); vctx.lineWidth = lw;
+      vctx.beginPath(); vctx.arc(res.x[i], res.y[i], res.r[i] || 8, 0, 7); vctx.stroke(); vctx.setLineDash([]);
+    }
+  }
+  if (pick) { vctx.strokeStyle = "#ff0"; vctx.lineWidth = lw; vctx.beginPath(); vctx.arc(pick.x, pick.y, pick.r, 0, 7); vctx.stroke(); }
+  // タッチ演出 + カウンター
+  if (res && i >= 0) {
+    let cnt = 0;
+    const fs = Math.round(W / 640 * 16 + 6);
+    for (const e of res.events) {
+      if (e.t > t + 1e-6) break;
+      if (e.counted) cnt++;
+      const age = t - e.t;
+      if (age < 0.6) {
+        const a = 1 - age / 0.6, col = e.counted ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
+        vctx.strokeStyle = col; vctx.lineWidth = lw * 2;
+        vctx.beginPath(); vctx.arc(e.x, e.y, (e.r || 10) * (1.3 + age * 3), 0, 7); vctx.stroke();
+        vctx.fillStyle = col; vctx.font = `bold ${fs}px sans-serif`;
+        vctx.fillText(e.counted ? `+1 ${e.part}` : `× ${e.reason}`, e.x + (e.r || 10) * 1.8, e.y - (e.r || 10));
+      }
+    }
+    $("countNow").textContent = cnt;
+    const big = Math.round(W / 640 * 48 + 12);
+    vctx.fillStyle = "rgba(0,0,0,.55)"; vctx.fillRect(8, 8, big * 2.6, big * 1.25);
+    vctx.fillStyle = "#fff"; vctx.font = `bold ${big}px sans-serif`; vctx.textBaseline = "top";
+    vctx.fillText(String(cnt), 16, 12);
+    const cw = vctx.measureText(String(cnt)).width;
+    vctx.font = `${Math.round(big * 0.35)}px sans-serif`;
+    vctx.fillText("回", 16 + cw + 6, 12 + big * 0.55);
+    vctx.textBaseline = "alphabetic";
+  }
+}
+
+function render(pick) {
+  if (!state.loaded) return;
+  const t = video.currentTime;
+  drawFrame(t, null, pick);
+  const d = video.duration || 1;
+  $("seek").value = Math.round(t / d * 1000);
+  $("time").textContent = `${fmt(t)} / ${fmt(d)} 秒`;
+  drawChart(t);
+}
+
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function drawChart(t = 0) {
+  const c = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w) return;
+  c.width = w * dpr; c.height = h * dpr;
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const pad = { l: 34, r: 8, t: 8, b: 20 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  g.strokeStyle = cssVar("--line"); g.lineWidth = 1; g.strokeRect(pad.l, pad.t, pw, ph);
+  g.fillStyle = cssVar("--muted"); g.font = "11px sans-serif";
+  if (!state.frames || !state.result) { g.fillText("解析後に表示されます", pad.l + 10, pad.t + 20); return; }
+  const fr = state.frames, res = state.result, dur = video.duration || fr[fr.length - 1].t;
+  const X = tt => pad.l + tt / dur * pw, Y = yy => pad.t + yy / state.H * ph;  // 画面上=上
+  for (let s = 0; s <= dur; s += dur > 30 ? 5 : dur > 10 ? 2 : 1) { g.fillText(s + "s", X(s) - 6, h - 5); }
+  g.fillText("上", 8, pad.t + 10); g.fillText("下", 8, pad.t + ph);
+  // 足元
+  g.fillStyle = "rgba(96,165,250,.6)";
+  fr.forEach(f => { if (f.pose) { const gy = Math.max(f.pose[29].y, f.pose[30].y, f.pose[31].y, f.pose[32].y); g.fillRect(X(f.t), Y(gy), 1.5, 1.5); } });
+  // 生データ
+  g.fillStyle = "#9aa3b5";
+  fr.forEach(f => { if (f.ball) g.fillRect(X(f.t) - 1, Y(f.ball.y) - 1, 2, 2); });
+  // 平滑化
+  g.strokeStyle = cssVar("--ball"); g.lineWidth = 1.6; g.beginPath();
+  let pen = false;
+  res.s.forEach((v, k) => { if (isNaN(v)) { pen = false; return; } const px = X(fr[k].t), py = Y(v); pen ? g.lineTo(px, py) : g.moveTo(px, py); pen = true; });
+  g.stroke();
+  // しきい値の目安
+  g.fillStyle = cssVar("--muted"); g.fillText(`上下幅しきい値 ${res.ampPx.toFixed(0)}px`, pad.l + 6, pad.t + 12);
+  // イベント
+  for (const e of res.events) {
+    const px = X(e.t), py = Y(e.y);
+    if (e.counted) { g.fillStyle = "#22c55e"; g.beginPath(); g.arc(px, py, 4, 0, 7); g.fill(); }
+    else { g.strokeStyle = "#ef4444"; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); }
+  }
+  // 現在位置
+  g.strokeStyle = cssVar("--text"); g.lineWidth = 1; g.beginPath(); g.moveTo(X(t), pad.t); g.lineTo(X(t), pad.t + ph); g.stroke();
+  c.onclick = async (ev) => {
+    const rect = c.getBoundingClientRect();
+    const tt = Math.max(0, Math.min(dur, (ev.clientX - rect.left - pad.l) / pw * dur));
+    stopPlayback(); await seekTo(tt); render();
+  };
+}
+window.addEventListener("resize", () => render());
+
+/* ---------------- 再生操作 ---------------- */
+let raf = 0;
+function loop() { render(); if (!video.paused && !video.ended) raf = requestAnimationFrame(loop); else { $("btnPlay").textContent = "▶ 再生"; render(); } }
+function stopPlayback() { video.pause(); cancelAnimationFrame(raf); $("btnPlay").textContent = "▶ 再生"; }
+$("btnPlay").addEventListener("click", async () => {
+  if (state.analyzing) return;
+  if (video.paused) {
+    if (video.ended || video.currentTime >= video.duration - 0.01) await seekTo(0);
+    video.playbackRate = +$("speed").value;
+    await video.play(); $("btnPlay").textContent = "❚❚ 一時停止"; loop();
+  } else stopPlayback();
+});
+$("speed").addEventListener("change", () => video.playbackRate = +$("speed").value);
+$("seek").addEventListener("input", async () => { if (state.analyzing) return; stopPlayback(); await seekTo($("seek").value / 1000 * video.duration); render(); });
+const step = async (d) => { if (state.analyzing) return; stopPlayback(); await seekTo(Math.max(0, video.currentTime + d / (state.fps || 30))); render(); };
+$("btnPrev").addEventListener("click", () => step(-1));
+$("btnNext").addEventListener("click", () => step(1));
+document.addEventListener("keydown", (e) => {
+  if (!state.loaded || e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") return;
+  if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+  else if (e.key === " ") { e.preventDefault(); $("btnPlay").click(); }
+});
+
+/* ---------------- CSV ---------------- */
+$("btnCsv").addEventListener("click", () => {
+  const res = state.result, fr = state.frames;
+  const evAt = new Map(res.events.map(e => [e.i, e]));
+  const rows = [["frame", "time_s", "ball_x", "ball_y", "ball_r", "score", "interpolated", "smoothed_y", "event", "part", "pose_detected"]];
+  fr.forEach((f, k) => {
+    const e = evAt.get(k);
+    rows.push([k, f.t.toFixed(3), f.ball ? f.ball.x.toFixed(1) : "", f.ball ? f.ball.y.toFixed(1) : "", f.ball ? f.ball.r.toFixed(1) : "",
+      f.ball ? f.ball.score.toFixed(2) : "", res.interp[k] ? 1 : 0, isNaN(res.s[k]) ? "" : res.s[k].toFixed(1),
+      e ? (e.counted ? "count" : "excluded:" + e.reason) : "", e ? e.part : "", f.pose ? 1 : 0]);
+  });
+  const blob = new Blob(["﻿" + rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "lifting_frames.csv"; a.click();
+});
+
+drawChart();
+</script>
+</body>
+</html>
