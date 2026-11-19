@@ -46,6 +46,11 @@
   .viewer video#cam { display: block; width: 100%; height: auto; }
   .viewer .countdown { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     font-size: 120px; font-weight: 800; color: #fff; text-shadow: 0 4px 20px rgba(0,0,0,.6); pointer-events: none; }
+  .viewer .live { position: absolute; left: 10px; top: 10px; background: rgba(0,0,0,.6); color: #fff; border-radius: 10px;
+    padding: 6px 14px; pointer-events: none; line-height: 1.1; }
+  .viewer .live b { font-size: 56px; font-variant-numeric: tabular-nums; }
+  .viewer .live .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #888; margin-right: 6px; }
+  .viewer .live .dot.on { background: #22c55e; }
   .rectime { color: var(--bad); font-weight: 700; font-variant-numeric: tabular-nums; }
   button.rec { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
   .viewer .placeholder { color: #aab; text-align: center; padding: 80px 20px; }
@@ -71,7 +76,7 @@
   .ok { color: var(--accent); } .ng { color: var(--bad); }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
-  #video { position: fixed; left: -10000px; top: 0; width: 2px; height: 2px; opacity: 0; }
+  #video { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: .01; pointer-events: none; z-index: -1; }
   details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .status { font-size: 13px; margin-top: 6px; min-height: 1.6em; }
   .swatch { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); vertical-align: middle; }
@@ -94,13 +99,19 @@
         <span class="rectime" id="recTime" hidden></span>
       </div>
       <div class="row" style="margin-top:8px">
-        <label><input type="checkbox" id="autoAnalyze" checked> 録画を止めたらすぐ解析する</label>
+        <label><input type="checkbox" id="autoAnalyze" checked> 撮影・読み込みが終わったらすぐ解析する</label>
         <label>開始前カウントダウン <select id="countdown"><option value="0">なし</option><option value="3" selected>3秒</option><option value="5">5秒</option><option value="10">10秒</option></select></label>
       </div>
       <div class="row" style="margin-top:8px">
         <span class="hint">または動画ファイル:</span>
         <input type="file" id="file" accept="video/*">
       </div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="btnAnalyze" disabled>解析開始</button>
+        <button id="btnCancel" hidden>中止</button>
+      </div>
+      <progress id="progress" value="0" max="1" hidden></progress>
+      <div class="status" id="status"></div>
       <div class="hint" style="margin-top:6px">スマホは横向き・三脚などで固定し、全身とボールが映る距離で撮ると精度が上がります。スマホでカメラを使うには、このページをHTTPSのURLで開く必要があります。</div>
     </section>
 
@@ -109,6 +120,7 @@
         <div class="placeholder" id="placeholder">「カメラを起動」で撮影するか、動画ファイルを選んでください</div>
         <video id="cam" playsinline muted hidden></video>
         <div class="countdown" id="cdOverlay" hidden></div>
+        <div class="live" id="liveBox" hidden><b id="liveCount">0</b> 回<br><small><span class="dot" id="liveDot"></span><span id="liveMsg">ボール検出中</span></small></div>
         <canvas id="view" hidden></canvas>
       </div>
       <div class="controls">
@@ -195,12 +207,6 @@
           <option value="60">60 fps(高速な動き向け・遅い)</option>
         </select>
       </div>
-      <div class="row">
-        <button class="primary" id="btnAnalyze" disabled>解析開始</button>
-        <button id="btnCancel" hidden>中止</button>
-      </div>
-      <progress id="progress" value="0" max="1" hidden></progress>
-      <div class="status" id="status"></div>
     </section>
 
     <section class="panel">
@@ -302,8 +308,15 @@ $("file").addEventListener("change", async (e) => {
   const f = e.target.files[0];
   if (!f) return;
   closeCamera();
-  await loadSource(URL.createObjectURL(f));
+  const ok = await loadSource(URL.createObjectURL(f));
+  if (ok) autoStart();
 });
+
+function autoStart() {
+  if (!$("autoAnalyze").checked) return;
+  if (mode() === "ai" || state.colorTarget) analyze();
+  else setStatus("映像の中のボールをタップして色を登録し、「解析開始」を押してください。");
+}
 
 async function loadSource(url) {
   stopPlayback();
@@ -313,9 +326,16 @@ async function loadSource(url) {
   setStatus("動画を読み込み中…");
   try {
     await new Promise((res, rej) => {
-      video.onloadeddata = res;
-      video.onerror = () => rej(new Error("この動画形式はこのブラウザで再生できません"));
+      const tm = setTimeout(() => rej(new Error("動画を読み込めませんでした(時間切れ)。別の動画で試すか、ページを再読み込みしてください。")), 20000);
+      video.onloadedmetadata = () => { clearTimeout(tm); res(); };
+      video.onerror = () => { clearTimeout(tm); rej(new Error("この動画形式はこのブラウザで再生できません")); };
+      video.load();
     });
+    // iPhone(Safari)はユーザー操作なしだとフレームを読み込まないことがあるので、一瞬再生してデコードさせる
+    if (video.readyState < 2) {
+      try { await video.play(); video.pause(); } catch (e) { console.warn(e); }
+      if (video.readyState < 2) await once(video, "loadeddata", 5000);
+    }
     if (!isFinite(video.duration)) { // MediaRecorder製webm等で長さが不明な場合
       video.currentTime = 1e9; await once(video, "seeked"); video.currentTime = 0; await once(video, "seeked");
     }
@@ -370,6 +390,8 @@ async function openCamera() {
 function closeCamera(keepUI) {
   if (camState.rec && camState.rec.state !== "inactive") { camState.rec.onstop = null; camState.rec.stop(); }
   clearInterval(camState.timer); clearInterval(camState.cdTimer); $("cdOverlay").hidden = true;
+  if (camState.live) camState.live.on = false;
+  $("liveBox").hidden = true;
   if (camState.stream) camState.stream.getTracks().forEach(t => t.stop());
   camState.stream = null; camState.rec = null;
   cam.srcObject = null;
@@ -389,6 +411,7 @@ function startRecording() {
   camState.rec.onstop = onRecorded;
   camState.rec.start(250);
   camState.t0 = performance.now();
+  startLive();
   $("btnRec").textContent = "■ 録画停止"; $("btnRec").classList.add("rec"); $("btnRec").disabled = false;
   $("recTime").hidden = false;
   camState.timer = setInterval(() => { $("recTime").textContent = "● " + ((performance.now() - camState.t0) / 1000).toFixed(1) + "秒"; }, 100);
@@ -406,18 +429,59 @@ function beginRecording() {
     startRecording();
   }, 1000);
 }
+async function startLive() {
+  const live = camState.live = { frames: [], on: true, W: 0, H: 0, n: 0 };
+  setSizeFrom(cam.videoWidth, cam.videoHeight);
+  live.W = state.W; live.H = state.H;
+  $("liveBox").hidden = false; $("liveCount").textContent = "0";
+  let det = null;
+  if (mode() === "ai") {
+    $("liveMsg").textContent = "AIを準備中…";
+    try { det = await getDetector($("aiModel").value); } catch (e) { $("liveMsg").textContent = "AIを読み込めません"; return; }
+  } else if (!state.colorTarget) { $("liveMsg").textContent = "色が未登録のためカウントなし"; return; }
+  const track = makeTracker(mode(), det);
+  const P = () => ({ amp: +$("amp").value, minInt: +$("minInt").value, smooth: +$("smooth").value, gap: +$("gap").value, usePose: false });
+  const useRVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+  const step = () => {
+    if (!live.on) return;
+    state.W = live.W; state.H = live.H;
+    const t = (performance.now() - camState.t0) / 1000;
+    wctx.drawImage(cam, 0, 0, live.W, live.H);
+    const ball = track();
+    live.frames.push({ t, ball });
+    $("liveDot").classList.toggle("on", !!ball);
+    $("liveMsg").textContent = ball ? "ボール検出中" : "ボールを探しています";
+    if (++live.n % 6 === 0 && t > 0.5) {
+      const fr = resample(live.frames, 30, t);
+      $("liveCount").textContent = computeCounts(fr, 30, P()).total;
+    }
+    useRVFC ? cam.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+  };
+  useRVFC ? cam.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+}
+
 async function onRecorded() {
   clearInterval(camState.timer);
+  const live = camState.live;
+  if (live) live.on = false;
+  $("liveBox").hidden = true;
   const type = camState.rec.mimeType || "video/webm";
   const blob = new Blob(camState.chunks, { type });
   closeCamera();
   if (!blob.size) { setStatus("録画データが空でした。もう一度お試しください。", true); return; }
   const ok = await loadSource(URL.createObjectURL(blob));
   if (!ok) return;
-  if ($("autoAnalyze").checked) {
-    if (mode() === "ai" || state.colorTarget) analyze();
-    else setStatus("撮影完了。映像の中のボールをタップして色を登録し、「解析開始」を押してください。");
+  // 撮影中の追跡結果がそろっていれば、それをそのまま使う(解析し直さない)
+  const dur = video.duration;
+  if (live && live.frames.length >= dur * 8 && live.W === state.W && live.H === state.H) {
+    state.analyzing = true; state.cancel = false; updateAnalyzeBtn();
+    try {
+      await finishAnalysis(resample(live.frames, 30, dur), 30, $("usePose").checked, performance.now());
+    } catch (err) { setStatus("エラー:" + (err.message || err), true); }
+    finally { state.analyzing = false; $("progress").hidden = true; updateAnalyzeBtn(); }
+    return;
   }
+  autoStart();
 }
 $("btnCam").addEventListener("click", openCamera);
 $("btnCamOff").addEventListener("click", () => closeCamera());
@@ -443,9 +507,22 @@ async function seekTo(t) {
 /* ---------------- 色指定(色追跡モード) ---------------- */
 view.addEventListener("click", (e) => {
   if (mode() !== "color" || state.analyzing || !state.loaded) return;
-  const rect = view.getBoundingClientRect();
+  pickColor(e, view, video);
+});
+$("cam").addEventListener("click", (e) => {
+  if (mode() !== "color" || !camState.stream) return;
+  setSizeFrom(cam.videoWidth, cam.videoHeight);
+  pickColor(e, $("cam"), $("cam"));
+});
+function setSizeFrom(w, h) {
+  const s = Math.min(1, MAX_DIM / Math.max(w, h));
+  state.W = work.width = view.width = Math.round(w * s);
+  state.H = work.height = view.height = Math.round(h * s);
+}
+function pickColor(e, el, src) {
+  const rect = el.getBoundingClientRect();
   const x = (e.clientX - rect.left) / rect.width * state.W, y = (e.clientY - rect.top) / rect.height * state.H;
-  wctx.drawImage(video, 0, 0, state.W, state.H);
+  wctx.drawImage(src, 0, 0, state.W, state.H);
   const r = 3, d = wctx.getImageData(Math.max(0, x - r) | 0, Math.max(0, y - r) | 0, 2 * r + 1, 2 * r + 1).data;
   let R = 0, G = 0, B = 0, n = 0;
   for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; n++; }
@@ -457,10 +534,10 @@ view.addEventListener("click", (e) => {
   if (blob) state.colorTarget.refArea = blob.area;
   $("swatch").style.background = `rgb(${R | 0},${G | 0},${B | 0})`;
   $("colorInfo").textContent = blob ? `登録済み(推定直径 ${(blob.r * 2).toFixed(0)}px)` : "登録済み";
-  setStatus("色を登録しました。「解析開始」を押してください。");
   updateAnalyzeBtn();
-  render({ x, y, r: blob ? blob.r : 10 });
-});
+  if (src === video) { setStatus("色を登録しました。「解析開始」を押してください。"); render({ x, y, r: blob ? blob.r : 10 }); }
+  else setStatus("色を登録しました。「録画開始」を押すと、撮影しながらカウントします。");
+}
 
 function rgb2hsv(r, g, b) {
   r /= 255; g /= 255; b /= 255;
@@ -571,7 +648,7 @@ async function getPose() {
   setStatus("ポーズ推定モデルを読み込み中…");
   state.pose = await createWithFallback(delegate => mod.PoseLandmarker.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: MODEL_URLS.pose, delegate },
-    runningMode: "VIDEO", numPoses: 1,
+    runningMode: "IMAGE", numPoses: 1,
   }));
   return state.pose;
 }
@@ -613,6 +690,102 @@ function detectBallAI(det, prev) {
 $("btnAnalyze").addEventListener("click", analyze);
 $("btnCancel").addEventListener("click", () => { state.cancel = true; });
 
+function makeTracker(m, det) {
+  let prev = null, prevAge = 99;
+  return () => {
+    const p = prevAge <= 10 ? prev : null;
+    const ball = m === "ai" ? detectBallAI(det, p) : detectBallColor(p);
+    if (ball) { prev = ball; prevAge = 0; } else prevAge++;
+    return ball;
+  };
+}
+
+/* 不規則な時刻のサンプルを等間隔(fps)のフレーム列にそろえる */
+function resample(raw, fps, dur) {
+  const n = Math.max(1, Math.floor(dur * fps)), out = [];
+  let j = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / fps;
+    while (j + 1 < raw.length && raw[j + 1].t <= t) j++;
+    const a = raw[j], b = raw[j + 1];
+    let ball = null;
+    if (a && b && a.t <= t && a.ball && b.ball && b.t - a.t <= 2.5 / fps) {
+      const k = (t - a.t) / (b.t - a.t);
+      ball = { x: a.ball.x + (b.ball.x - a.ball.x) * k, y: a.ball.y + (b.ball.y - a.ball.y) * k,
+        r: a.ball.r + (b.ball.r - a.ball.r) * k, score: Math.min(a.ball.score, b.ball.score) };
+    } else {
+      const c = [a, b].filter(q => q && Math.abs(q.t - t) <= 0.75 / fps).sort((p, q) => Math.abs(p.t - t) - Math.abs(q.t - t))[0];
+      if (c) ball = c.ball;
+    }
+    out.push({ t, ball, pose: null });
+  }
+  return out;
+}
+
+/* 方法A:動画を再生しながら、届いたフレームを順に解析(シークしないので速い) */
+function scanByPlayback(track, target, onProgress, startRate = 1) {
+  return new Promise((resolve, reject) => {
+    const out = [];
+    let rate = Math.max(0.25, startRate), stopped = false;
+    const finish = (err) => {
+      if (stopped) return; stopped = true;
+      video.onended = null; video.pause(); video.playbackRate = 1;
+      err ? reject(err) : resolve(out);
+    };
+    const onFrame = (now, meta) => {
+      if (stopped) return;
+      if (state.cancel) return finish(new Error("中止しました"));
+      const t = meta.mediaTime;
+      wctx.drawImage(video, 0, 0, state.W, state.H);
+      out.push({ t, ball: track() });
+      // 処理が追いつかなければ再生速度を落とし、余裕があれば上げる
+      if (out.length % 6 === 0) {
+        const span = out[out.length - 1].t - out[out.length - 6].t;
+        const sps = 5 / Math.max(span, 1e-3);
+        rate = Math.min(2, Math.max(0.25, rate * Math.min(1.5, Math.max(0.5, sps / target))));
+        video.playbackRate = rate;
+      }
+      onProgress(t, out);
+      if (video.ended || t >= video.duration - 0.02) return finish();
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.onended = () => setTimeout(() => finish(), 50);
+    video.muted = true; video.playbackRate = rate;
+    video.requestVideoFrameCallback(onFrame);
+    video.play().catch(finish);
+  });
+}
+/* 方法B:1フレームずつシーク(古いブラウザ向け) */
+async function scanBySeek(track, fps, onProgress) {
+  const out = [], n = Math.max(1, Math.floor(video.duration * fps));
+  for (let i = 0; i < n; i++) {
+    if (state.cancel) throw new Error("中止しました");
+    const t = i / fps;
+    await seekTo(t + 0.5 / fps);
+    wctx.drawImage(video, 0, 0, state.W, state.H);
+    out.push({ t, ball: track() });
+    if (i % 3 === 0) { onProgress(t, out); await new Promise(r => setTimeout(r, 0)); }
+  }
+  return out;
+}
+
+/* ポーズ推定はタッチ候補の瞬間だけ行う */
+async function posePass(frames, fps) {
+  const pose = await getPose();
+  const cand = computeCounts(frames, fps, { amp: 0.3, minInt: 0, smooth: +$("smooth").value, gap: 0.6, usePose: false });
+  const idx = cand.events.map(e => e.i);
+  for (let k = 0; k < idx.length; k++) {
+    if (state.cancel) throw new Error("中止しました");
+    const i = idx[k];
+    await seekTo(frames[i].t + 0.5 / fps);
+    wctx.drawImage(video, 0, 0, state.W, state.H);
+    const r = pose.detect(work);
+    if (r.landmarks && r.landmarks[0]) frames[i].pose = r.landmarks[0].map(q => ({ x: q.x * state.W, y: q.y * state.H, v: q.visibility ?? 1 }));
+    $("progress").value = (k + 1) / idx.length;
+    setStatus(`タッチの瞬間の姿勢を確認中… ${k + 1}/${idx.length}`);
+  }
+}
+
 async function analyze() {
   stopPlayback();
   state.analyzing = true; state.cancel = false;
@@ -621,44 +794,39 @@ async function analyze() {
   const usePose = $("usePose").checked, m = mode();
   try {
     const det = m === "ai" ? await getDetector($("aiModel").value) : null;
-    const pose = usePose ? await getPose() : null;
-    const fps = +$("fps").value, n = Math.max(1, Math.floor(video.duration * fps));
-    const frames = [];
-    $("progress").hidden = false;
-    let prev = null, prevAge = 99, t0 = performance.now();
-    for (let i = 0; i < n; i++) {
-      if (state.cancel) throw new Error("中止しました");
-      const t = i / fps;
-      await seekTo(t + 0.5 / fps);   // フレーム境界ちょうどを避ける
-      wctx.drawImage(video, 0, 0, state.W, state.H);
-      const p = prevAge <= 10 ? prev : null;
-      const ball = m === "ai" ? detectBallAI(det, p) : detectBallColor(p);
-      if (ball) { prev = ball; prevAge = 0; } else prevAge++;
-      let lm = null;
-      if (pose) {
-        state.tsCounter += Math.round(1000 / fps);
-        const r = pose.detectForVideo(work, state.tsCounter);
-        if (r.landmarks && r.landmarks[0]) lm = r.landmarks[0].map(q => ({ x: q.x * state.W, y: q.y * state.H, v: q.visibility ?? 1 }));
-      }
-      frames.push({ t, ball, pose: lm });
-      if (i % 3 === 0 || i === n - 1) {
-        state.frames = frames; state.fps = fps;
-        drawFrame(t, frames[i]);
-        $("progress").value = (i + 1) / n;
-        const el = (performance.now() - t0) / 1000, eta = el / (i + 1) * (n - i - 1);
-        setStatus(`解析中… ${i + 1}/${n} フレーム(残り約${Math.ceil(eta)}秒)`);
-        await new Promise(r => setTimeout(r, 0));
-      }
-    }
-    state.frames = frames; state.fps = fps;
-    const dr = frames.filter(f => f.ball).length / n;
-    setStatus(`解析完了(${((performance.now() - t0) / 1000).toFixed(1)}秒)` +
-      (dr < 0.5 ? "。ボールの検出率が低いです。色追跡モードやLite2モデルも試してください。" : ""), dr < 0.5);
-    $("btnCsv").disabled = false;
-    state.analyzing = false;
-    recount();
+    if (usePose) getPose().catch(() => {});        // 裏で読み込んでおく
+    const fps = +$("fps").value, dur = video.duration;
+    $("progress").hidden = false; $("progress").value = 0;
+    const t0 = performance.now();
+    let lastUi = 0;
+    const onProgress = (t, out) => {
+      const now = performance.now();
+      if (now - lastUi < 120) return;
+      lastUi = now;
+      drawFrame(t, out[out.length - 1]);
+      $("progress").value = t / dur;
+      const el = (now - t0) / 1000, eta = t > 0 ? el / t * (dur - t) : 0;
+      setStatus(`ボールを追跡中… ${fmt(t)} / ${fmt(dur)}秒(残り約${Math.ceil(eta)}秒)`);
+    };
     await seekTo(0);
-    render();
+    const track = makeTracker(m, det);
+    // 1フレームの処理時間を測って、再生しながら解析できるか判断する
+    const calib = makeTracker(m, det);
+    let proc = 0;
+    for (let k = 0; k < 4; k++) {
+      await seekTo((k + 0.5) / fps);
+      wctx.drawImage(video, 0, 0, state.W, state.H);
+      const a = performance.now(); calib(); const b = performance.now();
+      if (k > 0) proc += (b - a) / 3;      // 初回はウォームアップなので除外
+    }
+    const needRate = 1000 / Math.max(1, proc) / fps;   // 目標fpsを保てる再生速度
+    const canPlay = "requestVideoFrameCallback" in HTMLVideoElement.prototype && needRate >= 0.25;
+    console.log(`1フレーム ${proc.toFixed(1)}ms → ${canPlay ? "再生しながら解析 x" + Math.min(2, needRate * 0.8).toFixed(2) : "シークで解析"}`);
+    await seekTo(0);
+    const raw = canPlay
+      ? await scanByPlayback(track, fps, onProgress, Math.min(2, needRate * 0.8))
+      : await scanBySeek(track, fps, onProgress);
+    await finishAnalysis(resample(raw, fps, dur), fps, usePose, t0);
   } catch (err) {
     console.error(err);
     setStatus("エラー:" + (err.message || err) +
@@ -668,6 +836,19 @@ async function analyze() {
     $("btnCancel").hidden = true; $("progress").hidden = true;
     updateAnalyzeBtn();
   }
+}
+
+async function finishAnalysis(frames, fps, usePose, t0) {
+  state.frames = frames; state.fps = fps;
+  if (usePose) { $("progress").hidden = false; await posePass(frames, fps); }
+  const dr = frames.filter(f => f.ball).length / frames.length;
+  setStatus(`解析完了(${((performance.now() - t0) / 1000).toFixed(1)}秒)` +
+    (dr < 0.5 ? "。ボールの検出率が低いです。色追跡モードやLite2モデルも試してください。" : ""), dr < 0.5);
+  $("btnCsv").disabled = false;
+  state.analyzing = false;
+  recount();
+  await seekTo(0);
+  render();
 }
 
 /* ---------------- カウント処理 ---------------- */
@@ -736,7 +917,7 @@ function computeCounts(frames, fps, P) {
   for (const b of bottoms) {
     const i = b.i, t = frames[i].t;
     const ev = { i, t, x: x[i], y: s[i], rawY: y[i], r: r[i], amp: Math.max(b.rise, b.fall) / (diam || 1), part: "—", counted: true, reason: "" };
-    const lm = poseNear(frames, i, 2);
+    const lm = poseNear(frames, i);
     if (lm && P.usePose) {
       const c = contactInfo(lm, ev.x, ev.rawY, ev.r || diam / 2);
       ev.part = c.part; ev.ground = c.groundY;
@@ -753,7 +934,7 @@ function computeCounts(frames, fps, P) {
   return { y, x, r, s, interp, events, diam, ampPx, total: events.filter(e => e.counted).length, maxStreak };
 }
 
-function poseNear(frames, i, w) {
+function poseNear(frames, i, w = 3) {
   for (let d = 0; d <= w; d++) for (const k of [i - d, i + d]) if (frames[k] && frames[k].pose) return frames[k].pose;
   return null;
 }
@@ -993,6 +1174,8 @@ $("btnCsv").addEventListener("click", () => {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "lifting_frames.csv"; a.click();
 });
 
+window.addEventListener("error", e => setStatus("エラー:" + e.message, true));
+window.addEventListener("unhandledrejection", e => setStatus("エラー:" + (e.reason && e.reason.message || e.reason), true));
 drawChart();
 </script>
 </body>
